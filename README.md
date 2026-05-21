@@ -1,6 +1,7 @@
 # Legichain Node.js / TypeScript SDK
 
-Official client for the **Legichain** AML, KYC and Travel Rule API.
+Official client for the **[Legichain](https://legichain.com)** AML, KYC and
+Travel Rule API.
 
 ```bash
 npm install legichain
@@ -18,6 +19,19 @@ yarn add legichain
 - Native `fetch` (Node 18+) — zero runtime dependencies
 - Dual ESM + CommonJS build
 - HMAC webhook verification helper
+
+## Get an API key
+
+Sign up at **<https://legichain.com>** — the Free plan ships with 1 RPS
+and 300 monthly credits, no card required. Once signed in:
+
+> **panel.legichain.com → Settings → API Keys → New key**
+
+Keys look like `lc_live_<22>.sk_live_<44>` (production) or
+`lc_test_<22>.sk_test_<44>` (test mode, never spends credits). Store
+them in your secret manager — the secret half is shown once and can't
+be recovered. See the [full API guide](https://legichain.com/developers)
+for plans, rate limits and reference docs.
 
 ---
 
