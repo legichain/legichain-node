@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 — 2026-05-27
+
+* **KYC** identity verification — full `client.kyc.*` surface for
+  `/v1/kyc/applications/*`. Server-side: forward base64-encoded NFC
+  chip bytes from a mobile client; this SDK never reads chips itself.
+* **KYC tenant admin** — `client.kycAdmin.{list,detail,approve,reject,requestRetry}`.
+* **Address Verification** — `client.addressVerification.{create,uploadProof,submit,status}`.
+* **Personas** — `client.personas.{create,list,get}`.
+* `RequestOptions.clientToken` → sent as `X-KYC-Client-Token` header.
+* New typed exports: `KycApplicationCreateInput`, `KycStatus`,
+  `KycDecision`, `AVCreateInput`, `AVStatus`, etc. See `types.ts`.
+
+# Changelog
+
 All notable changes to the Legichain Node.js / TypeScript SDK.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);

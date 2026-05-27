@@ -9,4 +9,14 @@ export type {
   BatchAsyncResponse, JobStatus,
   StatusComponent, StatusIncident, StatusPayload,
   ProblemDetails, RiskLevel, Recommendation,
+  // KYC
+  DocumentType, DocumentSide, Intent, KycCurrentStep,
+  DecisionOutcome, KycApplicationCreateInput, KycApplicationCreated,
+  KycStatus, KycDocumentSubmit, KycDocumentResponse,
+  KycNfcSubmit, KycNfcResponse, KycSelfieSubmit,
+  KycLivenessChallenge, KycLivenessSubmit, KycDecision,
+  KycAdminListItem, KycAdminListResponse,
+  // AV
+  AVDocumentType, ClaimedAddress, AVCreateInput, AVCreated,
+  AVProofInput, AVProofUploaded, AVStatus,
 } from "./types.js";

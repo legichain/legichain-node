@@ -27,6 +27,11 @@ interface RequestOptions {
   contentType?: string;
   /** Override Accept. */
   accept?:      string;
+  /** Per-KYC-application short-lived token issued by
+   *  `POST /v1/kyc/applications`. Required on every artefact endpoint
+   *  (documents / nfc / selfie / liveness / submit / retry / extend-ttl)
+   *  and on every AV per-verification endpoint. */
+  clientToken?: string;
 }
 
 const DEFAULT_BASE = "https://api.legichain.com";
@@ -87,6 +92,190 @@ export class Legichain {
     company: (q: CompanyQuery, opts?: RequestOptions) => this.#reportPdf("/v1/reports/company", q, opts),
   };
 
+  // ── KYC SDK surface ────────────────────────────────────────────────
+  //
+  // Server-side semantics: this SDK does NOT read NFC chips. Mobile
+  // clients (Flutter / React-Native / iOS / Android) extract the SOD
+  // + DG bytes; your backend forwards them to `kyc.submitNfc` as
+  // base64 strings.
+  readonly kyc = {
+    createApplication: (
+      body: import("./types.js").KycApplicationCreateInput,
+      opts?: RequestOptions,
+    ): Promise<import("./types.js").KycApplicationCreated> =>
+      this.#post("/v1/kyc/applications", body, opts),
+
+    status: (
+      applicationId: string,
+      opts?: { includeExtracted?: boolean },
+    ): Promise<import("./types.js").KycStatus> => this.#get(
+      `/v1/kyc/applications/${encodeURIComponent(applicationId)}/status${
+        opts?.includeExtracted ? "?include_extracted=true" : ""}`,
+    ),
+
+    uploadDocument: (
+      applicationId: string,
+      clientToken: string,
+      body: import("./types.js").KycDocumentSubmit,
+    ): Promise<import("./types.js").KycDocumentResponse> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/documents`,
+        body, { clientToken },
+      ),
+
+    /** Forward an NFC chip read produced by a mobile client.
+     *  All bytes already base64-encoded. Set `access_error: true` +
+     *  omit SOD when the mobile reader reports a chip-access failure. */
+    submitNfc: (
+      applicationId: string,
+      clientToken: string,
+      body: import("./types.js").KycNfcSubmit,
+    ): Promise<import("./types.js").KycNfcResponse> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/nfc`,
+        body, { clientToken },
+      ),
+
+    /** Shortcut for the access-error path. */
+    nfcAccessError: (
+      applicationId: string,
+      clientToken: string,
+      opts?: { protocol?: "BAC" | "PACE"; code?: string },
+    ): Promise<import("./types.js").KycNfcResponse> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/nfc`,
+        {
+          protocol: opts?.protocol ?? "PACE",
+          access_error: true,
+          access_error_code: opts?.code ?? "chip_not_responding",
+        },
+        { clientToken },
+      ),
+
+    uploadSelfie: (
+      applicationId: string,
+      clientToken: string,
+      body: import("./types.js").KycSelfieSubmit,
+    ): Promise<unknown> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/selfie`,
+        body, { clientToken },
+      ),
+
+    livenessChallenge: (
+      applicationId: string,
+      clientToken: string,
+      body?: { length?: number; ttl_seconds?: number },
+    ): Promise<import("./types.js").KycLivenessChallenge> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/liveness/challenge`,
+        body ?? { length: 3, ttl_seconds: 60 },
+        { clientToken },
+      ),
+
+    submitLiveness: (
+      applicationId: string,
+      clientToken: string,
+      body: import("./types.js").KycLivenessSubmit,
+    ): Promise<unknown> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/liveness`,
+        body, { clientToken },
+      ),
+
+    submit: (
+      applicationId: string,
+      clientToken: string,
+    ): Promise<import("./types.js").KycDecision> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/submit`,
+        {}, { clientToken },
+      ),
+
+    retry: (
+      applicationId: string,
+      clientToken: string,
+      reason?: string,
+    ): Promise<unknown> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/retry`,
+        reason ? { reason } : {},
+        { clientToken },
+      ),
+
+    extendTtl: (
+      applicationId: string,
+      clientToken: string,
+    ): Promise<unknown> =>
+      this.#post(
+        `/v1/kyc/applications/${encodeURIComponent(applicationId)}/extend-ttl`,
+        {}, { clientToken },
+      ),
+  };
+
+  // ── KYC tenant admin (compliance officer surface) ──────────────────
+  readonly kycAdmin = {
+    list: (
+      params?: { state?: string; intent?: string; persona_id?: string;
+        nfc_required?: boolean; limit?: number; cursor?: string; },
+    ): Promise<import("./types.js").KycAdminListResponse> => {
+      const qs = params
+        ? "?" + new URLSearchParams(
+            Object.entries(params)
+              .filter(([, v]) => v !== undefined && v !== null && v !== "")
+              .map(([k, v]) => [k, String(v)] as [string, string]),
+          ).toString()
+        : "";
+      return this.#get(`/v1/admin/kyc/applications${qs}`);
+    },
+    detail: (applicationId: string): Promise<unknown> =>
+      this.#get(`/v1/admin/kyc/applications/${encodeURIComponent(applicationId)}`),
+    approve: (applicationId: string,
+              body?: { notes?: string; reset_risk?: boolean }): Promise<unknown> =>
+      this.#post(`/v1/admin/kyc/applications/${encodeURIComponent(applicationId)}/approve`, body ?? {}),
+    reject: (applicationId: string,
+             body: { reason_code: string; notes?: string }): Promise<unknown> =>
+      this.#post(`/v1/admin/kyc/applications/${encodeURIComponent(applicationId)}/reject`, body),
+    requestRetry: (applicationId: string,
+                    body?: { notes?: string }): Promise<unknown> =>
+      this.#post(`/v1/admin/kyc/applications/${encodeURIComponent(applicationId)}/request-retry`, body ?? {}),
+  };
+
+  // ── Address Verification ───────────────────────────────────────────
+  readonly addressVerification = {
+    create: (body: import("./types.js").AVCreateInput): Promise<import("./types.js").AVCreated> =>
+      this.#post("/v1/address-verifications", body),
+    uploadProof: (verificationId: string, clientToken: string,
+                   body: import("./types.js").AVProofInput): Promise<import("./types.js").AVProofUploaded> =>
+      this.#post(`/v1/address-verifications/${encodeURIComponent(verificationId)}/proof`,
+                  body, { clientToken }),
+    submit: (verificationId: string, clientToken: string): Promise<unknown> =>
+      this.#post(`/v1/address-verifications/${encodeURIComponent(verificationId)}/submit`,
+                  {}, { clientToken }),
+    status: (verificationId: string): Promise<import("./types.js").AVStatus> =>
+      this.#get(`/v1/address-verifications/${encodeURIComponent(verificationId)}/status`),
+  };
+
+  // ── Personas ───────────────────────────────────────────────────────
+  readonly personas = {
+    create: (body: { subject_external_id?: string; display_name?: string;
+                      meta?: Record<string, unknown> }): Promise<unknown> =>
+      this.#post("/v1/personas", body),
+    list: (params?: { subject_external_id?: string; limit?: number; cursor?: string }):
+      Promise<unknown> => {
+      const qs = params
+        ? "?" + new URLSearchParams(
+            Object.entries(params)
+              .filter(([, v]) => v !== undefined && v !== "")
+              .map(([k, v]) => [k, String(v)] as [string, string]),
+          ).toString()
+        : "";
+      return this.#get(`/v1/personas${qs}`);
+    },
+    get: (personaId: string): Promise<unknown> =>
+      this.#get(`/v1/personas/${encodeURIComponent(personaId)}`),
+  };
+
   // ── platform-level ─────────────────────────────────────────────────
   status = (): Promise<StatusPayload> => this.#get("/v1/status");
 
@@ -122,6 +311,7 @@ export class Legichain {
     };
     if (opts.accept) headers["Accept"] = opts.accept;
     if (opts.idem)   headers["Idempotency-Key"] = opts.idem;
+    if (opts.clientToken) headers["X-KYC-Client-Token"] = opts.clientToken;
 
     let payload: string | undefined;
     if (body !== undefined) {
