@@ -8,8 +8,15 @@ export interface ClientOptions {
   /** API key in either `lc_live_…sk_live_…` (bearer) form or just the
    *  bearer string returned by /bootstrap. Required. */
   apiKey: string;
-  /** API base URL. Defaults to https://api.legichain.com */
+  /** API base URL. Defaults to https://api.legichain.com, which is the
+   *  control plane and knows where to send you. Set this only to pin a
+   *  region deliberately or to point at a staging host. */
   baseUrl?: string;
+  /** Region code, e.g. `"eu"` or `"tr"`. When given without `baseUrl`
+   *  the client starts at that region's host, saving one redirect on
+   *  the first call. Usually unnecessary — see `region` on the client,
+   *  which is filled in the moment the account's region is learned. */
+  region?: string;
   /** Request timeout in ms. Defaults to 30 000. */
   timeoutMs?: number;
   /** Custom fetch — useful for tests or non-Node runtimes. Defaults to
@@ -37,14 +44,24 @@ interface RequestOptions {
 const DEFAULT_BASE = "https://api.legichain.com";
 const SDK_UA       = "legichain-node/0.1.0";
 
+/** Where a region answers, when all we have is its code. The API
+ *  publishes the real host in the 421 it sends, and that is preferred;
+ *  this is the fallback for a reply that names a region and nothing
+ *  else. */
+const regionHost = (code: string) => `https://${code}-api.legichain.com`;
+
+/** The API refuses a call for an account it does not serve. */
+const WRONG_REGION = "REG_001_WRONG_REGION";
+
 
 /** Sync-style client built on the global fetch API. Every method is
  *  async; the SDK does not maintain a connection pool — Node's
  *  undici handles HTTP keep-alive transparently. */
 export class Legichain {
-  readonly baseUrl:   string;
   readonly timeoutMs: number;
 
+  #base:   string;
+  #region: string | null;
   readonly #apiKey:  string;
   readonly #fetch:   typeof fetch;
   readonly #headers: Record<string, string>;
@@ -54,7 +71,10 @@ export class Legichain {
       throw new Error("legichain: apiKey is required");
     }
     this.#apiKey   = opts.apiKey;
-    this.baseUrl   = (opts.baseUrl ?? DEFAULT_BASE).replace(/\/$/, "");
+    this.#region   = opts.region ?? null;
+    this.#base     = (
+      opts.baseUrl ?? (opts.region ? regionHost(opts.region) : DEFAULT_BASE)
+    ).replace(/\/$/, "");
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.#fetch    = opts.fetch ?? globalThis.fetch;
     this.#headers  = {
@@ -67,6 +87,46 @@ export class Legichain {
         "legichain: no fetch available — pass `fetch` in options or upgrade to Node 18+.",
       );
     }
+  }
+
+  /** The host this client is currently talking to. Changes by itself
+   *  the first time the API says the account lives somewhere else. */
+  get baseUrl(): string {
+    return this.#base;
+  }
+
+  /** The region serving this account, once it is known — `null` until
+   *  the first call, unless it was passed to the constructor. */
+  get region(): string | null {
+    return this.#region;
+  }
+
+  /** Explicit queued operations. A 202 receipt is not a completed result. */
+  readonly operations = {
+    screen: (kind: "person" | "company" | "crypto" | "batch", body: PersonQuery | CompanyQuery | CryptoQuery | {items: BatchItem[]}, idempotencyKey: string) =>
+      this.#enqueueOperation(`/v2/screen/${kind}`, body, idempotencyKey),
+    report: (kind: "person" | "company" | "wallet", body: Record<string, unknown>, idempotencyKey: string) =>
+      this.#enqueueOperation(`/v2/reports/${kind}`, body, idempotencyKey),
+    kycReport: (id: string, body: {decision_id: string; format?: "json" | "pdf"}, idempotencyKey: string) =>
+      this.#enqueueOperation(`/v2/reports/kyc/${encodeURIComponent(id)}`, body, idempotencyKey),
+    kycEvidence: (id: string, step: "documents" | "selfie" | "liveness" | "nfc", body: Record<string, unknown>, idempotencyKey: string, clientToken?: string) =>
+      this.#enqueueOperation(`/v2/kyc/applications/${encodeURIComponent(id)}/${step}`, body, idempotencyKey, clientToken),
+    addressSubmit: (id: string, idempotencyKey: string, notes?: string) =>
+      this.#enqueueOperation(`/v2/address-verifications/${encodeURIComponent(id)}/submit`, {notes}, idempotencyKey),
+    get: (id: string): Promise<import("./types.js").OperationStatus> => this.#get(`/v2/operations/${encodeURIComponent(id)}`),
+    task: (id: string, taskId: string): Promise<import("./types.js").OperationTaskResult> =>
+      this.#get(`/v2/operations/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`),
+    list: (options: {cursor?: string; state?: import("./types.js").OperationState; limit?: number} = {}): Promise<import("./types.js").OperationPage> => {
+      const query = new URLSearchParams(Object.entries(options).filter(([,v]) => v !== undefined).map(([k,v]) => [k,String(v)] as [string,string]));
+      return this.#get(`/v2/operations?${query}`);
+    },
+    cancel: (id: string): Promise<import("./types.js").OperationStatus> => this.#post(`/v2/operations/${encodeURIComponent(id)}/cancel`, {}),
+  };
+
+  async #enqueueOperation(path: string, body: unknown, key: string, clientToken?: string): Promise<import("./types.js").OperationAccepted> {
+    if (typeof key !== "string" || new TextEncoder().encode(key).length < 1 || new TextEncoder().encode(key).length > 256)
+      throw new Error("An explicit 1–256 byte idempotency key is required");
+    return this.#post(path, body, {idem:key,clientToken});
   }
 
   // ── screening ──────────────────────────────────────────────────────
@@ -300,8 +360,9 @@ export class Legichain {
 
   async #req<T>(
     method: "GET" | "POST", path: string, body: unknown, opts: RequestOptions,
+    retried = false,
   ): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+    const url = `${this.#base}${path}`;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
 
@@ -337,6 +398,24 @@ export class Legichain {
       try {
         problem = (await res.json()) as import("./types.js").ProblemDetails;
       } catch { /* tolerate non-JSON errors */ }
+      // This account is served by another deployment. The reply names
+      // it, so move and try again — once. Both 421s the API can send
+      // are produced before the request reaches a handler, so nothing
+      // was written and the retry is not a duplicate, with or without
+      // an idempotency key.
+      if (res.status === 421 && !retried && problem?.code === WRONG_REGION) {
+        const next = problem.api_base_url
+          ?? (problem.region ? regionHost(problem.region) : null);
+        if (next) {
+          const pinned = next.replace(/\/$/, "");
+          if (pinned !== this.#base) {
+            this.#base   = pinned;
+            this.#region = problem.region ?? this.#region;
+            return this.#req<T>(method, path, body, opts, true);
+          }
+        }
+      }
+
       throw new LegichainError(problem ?? {
         type: "https://legichain.com/errors/UNKNOWN",
         title: res.statusText || "Error",

@@ -1,5 +1,29 @@
 /* Public response shapes — mirror legichain.api.schemas (Pydantic). */
 
+export type OperationState = "queued" | "running" | "completed" | "failed" | "expired" | "cancelled";
+export interface OperationAccepted {
+  operation_id: string; status: OperationState; status_url: string;
+  deadline_at: string; protocol: 1; items?: number;
+}
+export interface OperationSummary {
+  id: string; kind: string; status: OperationState; created_at: string;
+  deadline_at: string; finished_at: string | null; error_code: string | null;
+}
+export interface OperationTaskSummary {
+  id: string; step_key: string; pool: string;
+  status: "blocked" | "ready" | "dispatched" | "retry" | Exclude<OperationState,"queued">;
+  error_code: string | null; attempts: number; finished_at: string | null; result_url: string;
+}
+export interface OperationStatus extends OperationSummary {
+  result: Record<string, unknown> | null; result_purged_at: string | null;
+  data_revoked: boolean; data_purged: boolean; tasks: OperationTaskSummary[];
+}
+export interface OperationTaskResult extends Omit<OperationTaskSummary,"attempts" | "result_url"> {
+  created_at: string; result: Record<string, unknown> | null;
+  result_purged_at: string | null; data_revoked: boolean; data_purged: boolean;
+}
+export interface OperationPage { items: OperationSummary[]; next_cursor: string | null }
+
 export interface HitFlags {
   is_sanctioned:    boolean;
   is_pep:           boolean;
@@ -128,6 +152,11 @@ export interface ProblemDetails {
   code:     string;
   instance?: string;
   errors?:  Array<Record<string, unknown>>;
+  /** On a 421 (`REG_001_WRONG_REGION`): the region that owns this
+   *  account, and the host that serves it. The client re-pins to that
+   *  host and retries, so callers rarely see this error at all. */
+  region?:  string;
+  api_base_url?: string;
 }
 
 

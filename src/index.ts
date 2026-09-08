@@ -4,6 +4,8 @@ export type { ClientOptions } from "./client.js";
 export { LegichainError, LegichainNetworkError } from "./errors.js";
 
 export type {
+  OperationAccepted, OperationState, OperationStatus, OperationSummary,
+  OperationTaskSummary, OperationTaskResult, OperationPage,
   HitFlags, Hit, ScreeningSummary, ScreeningResponse,
   PersonQuery, CompanyQuery, CryptoQuery, BatchItem,
   BatchAsyncResponse, JobStatus,
