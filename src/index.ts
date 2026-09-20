@@ -1,4 +1,7 @@
 export { Legichain } from "./client.js";
+export { KycSession, KycOperationError } from "./kyc.js";
+export type { KycEvidence } from "./kyc.js";
+export type { KycLivenessAction, KycLivenessActionName } from "./types.js";
 export type { ClientOptions } from "./client.js";
 
 export { LegichainError, LegichainNetworkError } from "./errors.js";

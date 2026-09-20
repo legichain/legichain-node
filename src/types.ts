@@ -185,6 +185,8 @@ export interface KycApplicationCreateInput {
   intent?: Intent;
   document_type_allowed?: DocumentType[];
   nfc_required?: boolean;
+  liveness_required?: boolean;
+  face_match_required?: boolean;
   callback_url?: string;
   claimed_full_name?: string;
   claimed_personal_number?: string;
@@ -216,6 +218,10 @@ export interface KycStatus {
   application_id: string;
   persona_id: string;
   state: string;
+  nfc_required: boolean;
+  liveness_required: boolean;
+  face_match_required: boolean;
+  document_type_allowed: DocumentType[];
   current_step: KycCurrentStep;
   retry_available: boolean;
   current_attempt: number;
@@ -268,6 +274,7 @@ export interface KycNfcSubmit {
   dg14_b64?: string; dg15_b64?: string;
   active_authentication_b64?: string;
   read_at_client?: string;
+  device_attestation?: Record<string, unknown>;
 }
 
 export interface KycNfcResponse {
@@ -286,6 +293,7 @@ export interface KycSelfieSubmit {
   image_b64: string;
   is_video?: boolean;
   captured_at_client?: string;
+  device_attestation?: Record<string, unknown>;
 }
 
 export interface KycLivenessChallenge {
@@ -297,19 +305,34 @@ export interface KycLivenessChallenge {
 }
 
 export interface KycLivenessSubmit {
-  challenge_token: string;
-  actions_performed: string[];
-  frames_b64?: string[];
-  pad_score?: number;
+  mode: "passive" | "active";
+  frame_b64: string;
+  frame_mime_type?: "image/jpeg" | "image/png" | "image/heic";
+  challenge_token?: string;
+  completed_actions?: KycLivenessAction[];
+  frames?: { image_b64: string; timestamp_ms: number }[];
+  captured_at_client?: string;
+  device_attestation?: Record<string, unknown>;
+}
+
+export type KycLivenessActionName = "blink" | "head_left" | "head_right" | "smile" | "look_up";
+export interface KycLivenessAction {
+  action: KycLivenessActionName;
+  started_at_ms: number;
+  ended_at_ms: number;
 }
 
 export interface KycDecision {
   application_id: string;
   persona_id: string;
-  outcome: DecisionOutcome;
+  state: string;
+  pending: boolean;
+  pending_on: string[];
+  poll_after_ms: number | null;
+  outcome: DecisionOutcome | null;
   outcome_reason: string | null;
   risk_score: number | null;
-  decision_id: string;
+  decision_id: string | null;
   hard_fail_codes: string[];
   manual_review_id: string | null;
   completed_at: string | null;

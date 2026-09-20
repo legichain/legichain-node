@@ -1,3 +1,21 @@
+# Legichain node SDK v2
+
+Official SDK for the existing Legichain API. [KYC v2 integration and migration](https://github.com/legichain/legichain-node/blob/main/KYC-V2.md)
+contains the current wire contract, check flags, asynchronous evidence and
+submission behavior. Version: **2.0.0**; publication status is tracked separately.
+
+```ts
+import { Legichain } from "legichain";
+const client = new Legichain({ apiKey: process.env.LEGICHAIN_API_KEY! });
+const flow = await client.kyc.start({ subject_external_id: "customer-42" }, { idem: "customer-42-application" });
+const receipt = await flow.evidence("documents", body, "customer-42-front-capture-1");
+await flow.wait(receipt.operation_id);
+// Upload remaining configured evidence, then:
+const submission = await flow.submit();
+```
+
+---
+
 # Legichain Node.js / TypeScript SDK
 
 Official client for the **[Legichain](https://legichain.com)** AML, KYC and

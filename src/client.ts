@@ -1,4 +1,5 @@
 import { LegichainError, LegichainNetworkError } from "./errors.js";
+import { KycSession } from "./kyc.js";
 import type {
   BatchAsyncResponse, BatchItem, CompanyQuery, CryptoQuery, JobStatus,
   PersonQuery, ScreeningResponse, StatusPayload,
@@ -42,7 +43,7 @@ interface RequestOptions {
 }
 
 const DEFAULT_BASE = "https://api.legichain.com";
-const SDK_UA       = "legichain-node/0.1.0";
+const SDK_UA       = "legichain-node/2.0.0";
 
 /** Where a region answers, when all we have is its code. The API
  *  publishes the real host in the 421 it sends, and that is preferred;
@@ -159,6 +160,10 @@ export class Legichain {
   // + DG bytes; your backend forwards them to `kyc.submitNfc` as
   // base64 strings.
   readonly kyc = {
+    start: async (body: import("./types.js").KycApplicationCreateInput, opts: RequestOptions): Promise<KycSession> => {
+      const created = await this.kyc.createApplication(body, opts);
+      return new KycSession(this, created.application_id, created.client_token);
+    },
     createApplication: (
       body: import("./types.js").KycApplicationCreateInput,
       opts?: RequestOptions,
